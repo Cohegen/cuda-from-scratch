@@ -1,3 +1,8 @@
+/*
+A simple and minimal cuda kernel which implements Vector Subtraction
+*/
+
+
 #include <iostream>
 #include <cuda_runtime.h>
 
