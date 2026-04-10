@@ -1,8 +1,11 @@
+<<<<<<< HEAD
 /*
 A simple and minimal cuda kernel which implements Vector Subtraction
 */
 
 
+=======
+>>>>>>> de77627 (updates made)
 #include <iostream>
 #include <cuda_runtime.h>
 
@@ -91,4 +94,8 @@ int main()
 
     return 0;
 
+<<<<<<< HEAD
 }
+=======
+}
+>>>>>>> de77627 (updates made)
