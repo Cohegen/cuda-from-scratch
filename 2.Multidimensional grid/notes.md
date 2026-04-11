@@ -1,165 +1,294 @@
-# Introduction to the module
-- In the last module we looked at how we can lauch a one-dimensional grid of threads by calling a kernel function to operate on elements of a one-dimensional arrays.
-- However, what is we're dealing with multidimensional data would we still launch a  one-dimensional grid of threads?
-- No that wouldn't even be possible.
-- In this module you'll learn how threads are organized and learn how threads and blocks can be used to process multidimensional arrays.
+# Introduction to the Module
+In the previous module, we used a 1D grid of threads to process 1D data such as vectors.
 
-## 1.Multidimensional grid organization
-- In CUDA, all threads in a grid execute the same kernel function, and they rely on coordinates i.e thread indices, to distinguish themselves from each other to identify the appropriate portion of the data to process.
-- From our previous module we learned that a grid constists of one or more blocks, and each block consists of one or more threads.
-- All threads in a block share the same block index, which can be accessed via **blockIdx** variable.
-- Each threads within the block has its unique index which can be accessed via the **threadIdx** variable.
-- When a thread executes a kernel function, references to the **blockIdx** and **threadIdx** variables return the coordinates of the thread.
-- A grid is a 3D array of block, and each blocks is 3D array of threads.
-- Now when calling the kernel we need to specifiy the size of the gird and blocks in each dimension.
-- Let's have a recap on what we learned in module 1.
-- We know that in order for us to specify things like size of the grid and block dimensions, we specify them using the execution configuration parameters.
-- The first execution configuration parameter specifies the dimensions of the grid in  number of blocks.
-- The second specifies the dimension of each block in the number of threads.
-- Each parameter has the type **dim3** which is an integer vector type of three elemetns **x**, **y** and **z**.
-- These three elements specify the sizes of the three dimensions.
-- In this example, the following code can be used to call the **vecAddkernel()** kernel function and generate a 1D grid that consists of 32 blocks, each of which consists of 128 threads.
-- Then this will make the total number of threads in the grid to be 128*32 = 4096.
-```
-dim3 dimGrid(32,1,1)
-dim3 dimBlock(128,1,1)
-vecAddkernel <<<dimGrid, dimBlock>>>(...);
-```
-- The grid and block dimensions can also be calculated from other variables.
-```
-dim3 dimGrid(ceil(n/256.0),1,1);
-dim3 dimBlock(256,1,1);
-vecAddkernel <<<dimGrid, dimBlock>>> (...);
+That works well for arrays like:
+- `[1, 2, 3, 4]`
 
-```
-- This allows the number of blocks to vary with the size of the vectors so that the grid will have enough threads to cover all vector elements.
-- In the code above we can see that we have to fix the block size at 256.
-- The value of the variable n at the kernel call tme will determine the dimension of the grid i.e the number of blocks within the grid.
-- If say n is equal to 1000, the grid will consist of four blocks.
-- This would enable the threads to cover a vector of maximum size of 1024 elements.
+But many real problems are not 1D. Images, matrices, and volumes are naturally 2D or 3D. In those cases, CUDA lets us organize threads and blocks in multiple dimensions so the thread layout matches the data layout more naturally.
 
-### 1.1 The **1D shortcut** for kernel launch
-- Previously when describing the dimensionality of our grid and threadblocks
-we did that as follows:
-```
-dim3 dimGrid(n,1,1);
-dim3 dimBlock(256,1,1);
-vecAddkernel<<<dimGrid,dimBlock>>>(...);
-```
-- where **n** is the number of blocks we wish out grid to have.
-- However, CUDA allows a shortcut for 1D cases:
-```
-kernel <<<dimGrid,dimBlock>>>(..);
-```
-- Say we write something like this:
-```
-kernel <<< 16,256>>>();
-```
-- What CUDA does internally is that it interprets it as:
-```
-dim3 dimGrid(16,1,1);
-dim3 dimBlock(256,1,1);
-```
-- Within the kernel function, the **x** field of the variables **gridDim** and **blockDim** are preinitalized according the values of the execution configuration parameters.
-- If n is equal to 4000, refernces to **gridDim.x** and **dimBlock.x** in the **vecAddkernel** kernel will result in 16 and 256 respectively.
+In this module, the main idea is simple:
+- A grid is made of blocks.
+- A block is made of threads.
+- Both grids and blocks can be 1D, 2D, or 3D.
+- We use thread and block coordinates to decide which part of the data each thread should process.
 
-### 1.2 Why does the **1D** shortcut work?
-- If you have some basic knowledge of C++ you maybe familiar with structs and constructors.
-- CUDA sues a **dim3** struct type as follows:
-```
-struct dim
-{
-    unsigned int x,y,z;
-}
-```
-- And it also has a constructor like:
-```
-dim3(unsigned int x =1, unsigned int y = 1, unsigned int z = 1);
-```
-- So when intialize **dim3** as follows:
-      - **dim3(16)** it becomes **(16,1,1)**.
-      - **dim3(8,4)** it becomes **(8,4,1)**.
+## 1. Multidimensional Grid Organization
+Every thread in a CUDA grid runs the same kernel function. What makes one thread different from another is its position.
 
-### 1.3 Builti-in variables inside kernels
-- CUDA gives us automatic variables.
-      -1. **Grid Size**: **gridDim.x ,gridDim.y, gridDim.z**
-      - 2 **Block size** : **blockDim.x, blockDim.y, blockDim.z**
-      - 3 **Thread position** : **threadIdx.x,threadIdx.y, threadIdx.z**
-      - 4 **Block position** : **blockIdx.x, blockIdx.y, blockIdx.z**
+CUDA gives each thread built-in coordinates:
+- `blockIdx` tells us which block the thread belongs to.
+- `threadIdx` tells us the thread's position inside its block.
 
-- In CUDA C the allowed values of **gridDim.x** range from 1 to (2^31) -1, and those of **gridDim.y** and **grdiDim.z** range from 1 to (2^16) -1 (65,535).
-- All threads in a block share the same **blockIdx.x , blockIdx.y** and **blockIdx.z** values.
-- Among blocks, the **blockIdx.x** values ranges from 0 to **gridDim.x-1**, the **blockIdx.y** value ranges from 0 to **gridDim.y-1** and the **blockIdx.z** value ranges from 0 to **gridDim.z-1**.
+CUDA also gives:
+- `gridDim` for the size of the grid
+- `blockDim` for the size of each block
 
-### 1.4  Block Configuration
-- Each block is organized into a 3D array of treads.
-- Two-dimensional blocks can be created by setting **blockDim.z** to 1 , as in the **vecAddkernel** example.
-- All blocks in a grid have the same dimensions and sizes.
-- The number of threads in each dimension of a block is specified by the second execution configuration parameter in the kernel call.
-- Within the kernel call this configuration parameter can be accessed as the **x,y** and **z** field of **blockDim**.
-- The total size of a block in the current CUDA systems is limited to 1024 threads.
-- These threads can be distributed across three dimensions in any way as long as the total number of threads does not exceed 1024.
+A useful way to think about this is:
+- The grid is an array of blocks.
+- Each block is an array of threads.
 
-**ADD Grid DIAGRAM HERE!!**
+Both of these arrays can be 1D, 2D, or 3D.
 
-- A grid and its blocks do not need the same dimensionality.
-- A grid can have higher dimensionality that its blcoks and vice versa.
-- For example in the above diagram, we see a grid with **gridDim** of (2,2,1) and a **blockDim** of (4,2,2).
-- Such a grid would be created as the following host code:
+## 1.1 Specifying Grid and Block Size
+When launching a kernel, we specify:
+- the number of blocks in the grid
+- the number of threads in each block
+
+CUDA uses the `dim3` type for this. `dim3` has three fields:
+- `x`
+- `y`
+- `z`
+
+Example:
+
+```cpp
+dim3 dimGrid(32, 1, 1);
+dim3 dimBlock(128, 1, 1);
+vecAddKernel<<<dimGrid, dimBlock>>>(...);
 ```
-dim3 dimGrid(2,2,1);
-dim3 dimBlock(4,2,2);
-KernelFunction <<<dimGrid, dimBlock>>>(...);
-```
-- The each  grid consists of four of blcks organized into a 2x2 array.
-- Each block is labeled with **(blockIdx.y,blockIdx.x)**.
-- For example the block (1,0) has **blockIdx.y** = 1 and **blockIdx.x** = 0.
-- Each **threadIdx** also constists of three field: x coordinate **threadIdx.x**, y coordinate **threadIdx.y** and the z coordinate **threadIdx.z**.
-- So if we have a grid of shape (2,2,1), it means that there's:
-      - 2 blocks in the x-direction
-      - 2 blocks in y-direction
-      - 1 in z-direction
-- So total blocks  = 2 * 2 * 1= 4 blocks
-- Also if the had block of dimension (4,2,2),it means that there's:
-      - 4 threads in the x-direction
-      - 2 in y-direction
-      - 2 in z-direction
 
-- The total threads per block is:
-```
-4 x 2 x 2 = 16 threads
-````
+This means:
+- the grid has `32` blocks
+- each block has `128` threads
+- total threads launched = `32 * 128 = 4096`
 
-## 2 Mapping threads to multidimensional data
-- Say we have picture **P** which havs 62 pixels in the vertical or y direction and 76 pixels the horizontal or x axis.
-- Assume that we decided to use a 16 x 16 block, with 16 threads in the x direction and 16 threads in the y direction.
-- We will need four blocks in the y direction and five blocks in the x direction, which resulrt to 4 x 5 = 20 blocks.
-- One Grid  looks like this:
+We can also compute the grid size from the input size:
+
+```cpp
+dim3 dimGrid(ceil(n / 256.0), 1, 1);
+dim3 dimBlock(256, 1, 1);
+vecAddKernel<<<dimGrid, dimBlock>>>(...);
 ```
-            X direction →
+
+Here:
+- each block has `256` threads
+- the number of blocks depends on `n`
+- this ensures there are enough threads to cover all elements
+
+If `n = 1000`, then:
+- `ceil(1000 / 256.0) = 4`
+- so the grid has `4` blocks
+- total threads launched = `4 * 256 = 1024`
+
+Some threads may not be needed, so the kernel usually checks whether the thread index is still inside the valid data range.
+
+## 1.2 The 1D Shortcut
+For 1D launches, CUDA allows a shorter syntax:
+
+```cpp
+kernel<<<16, 256>>>();
+```
+
+CUDA treats this as:
+
+```cpp
+dim3 dimGrid(16, 1, 1);
+dim3 dimBlock(256, 1, 1);
+kernel<<<dimGrid, dimBlock>>>();
+```
+
+So:
+- `16` means 16 blocks in the grid
+- `256` means 256 threads per block
+
+Inside the kernel:
+- `gridDim.x` will be `16`
+- `blockDim.x` will be `256`
+
+## 1.3 Why the Shortcut Works
+The shortcut works because `dim3` fills missing dimensions with `1`.
+
+Examples:
+- `dim3(16)` becomes `(16, 1, 1)`
+- `dim3(8, 4)` becomes `(8, 4, 1)`
+
+That is why writing `<<<16, 256>>>` is valid for a 1D launch.
+
+## 1.4 Built-In Variables Inside Kernels
+These are the most important built-in variables:
+
+- Grid size: `gridDim.x`, `gridDim.y`, `gridDim.z`
+- Block size: `blockDim.x`, `blockDim.y`, `blockDim.z`
+- Thread position in a block: `threadIdx.x`, `threadIdx.y`, `threadIdx.z`
+- Block position in the grid: `blockIdx.x`, `blockIdx.y`, `blockIdx.z`
+
+Important facts:
+- All threads in the same block have the same `blockIdx`.
+- Threads in the same block have different `threadIdx` values.
+- Blocks are indexed from `0` up to `gridDim - 1` in each dimension.
+
+## 1.5 Block Configuration
+Each block can be arranged as a 1D, 2D, or 3D set of threads.
+
+Example:
+
+```cpp
+dim3 dimGrid(2, 2, 1);
+dim3 dimBlock(4, 2, 2);
+kernelFunction<<<dimGrid, dimBlock>>>(...);
+```
+
+This means:
+- grid size = `(2, 2, 1)`
+- block size = `(4, 2, 2)`
+
+So the grid has:
+- 2 blocks in the `x` direction
+- 2 blocks in the `y` direction
+- 1 block in the `z` direction
+
+Total number of blocks:
+
+```cpp
+2 * 2 * 1 = 4 blocks
+```
+
+Each block has:
+- 4 threads in `x`
+- 2 threads in `y`
+- 2 threads in `z`
+
+Total threads per block:
+
+```cpp
+4 * 2 * 2 = 16 threads
+```
+
+Also note:
+- all blocks in a grid have the same shape
+- the total number of threads in one block cannot exceed `1024` on current CUDA systems
+
+## 2. Mapping Threads to Multidimensional Data
+Multidimensional grids are especially useful for images.
+
+Suppose we have an image:
+- height = `62` pixels
+- width = `76` pixels
+
+Suppose we choose a block size of `16 x 16`.
+
+That means:
+- each block has `16` threads in `x`
+- each block has `16` threads in `y`
+
+To cover the whole image, we need:
+- `ceil(76 / 16.0) = 5` blocks in the `x` direction
+- `ceil(62 / 16.0) = 4` blocks in the `y` direction
+
+So total blocks:
+
+```cpp
+5 * 4 = 20 blocks
+```
+
+We can visualize the grid like this:
+
+```text
+            x direction ->
         0      1      2      3      4
       +------+------+------+------+------+
-Y  0  | B00  | B01  | B02  | B03  | B04  |
+y  0  | B00  | B01  | B02  | B03  | B04  |
    1  | B10  | B11  | B12  | B13  | B14  |
    2  | B20  | B21  | B22  | B23  | B24  |
    3  | B30  | B31  | B32  | B33  | B34  |
       +------+------+------+------+------+
 ```
 
-- Each block looks like this:
-```
-        threadIdx.x →
-        0 1 2 3 ... 15
-      +------------------+
-   0  | o o o o ... o    |
-   1  | o o o o ... o    |
-   2  | o o o o ... o    |
-   .  | o o o o ... o    |
-  15  | o o o o ... o    |
-      +------------------+
-threadIdx.y ↓
+Each block contains a `16 x 16` arrangement of threads.
+
+## 2.1 How a Thread Finds Its Pixel
+For 2D image processing, each thread is usually mapped to one pixel.
+
+The global row and column handled by a thread are:
+
+```cpp
+row = blockIdx.y * blockDim.y + threadIdx.y;
+col = blockIdx.x * blockDim.x + threadIdx.x;
 ```
 
-- Each thread is assigned to process a pixel whose y and x coordinates are derived from its **blockIdx**
+This formula is very important.
 
+It says:
+- `blockIdx` tells us which block we are in
+- `threadIdx` tells us where we are inside that block
+- multiplying by `blockDim` shifts us to the correct global position
 
+Example:
+- thread `(0, 0)` inside block `(1, 0)`
+- block size = `(16, 16)`
+
+Then:
+
+```cpp
+row = 1 * 16 + 0 = 16
+col = 0 * 16 + 0 = 0
+```
+
+So that thread processes pixel:
+
+```cpp
+Pin(16, 0)
+```
+
+## 2.2 Why Boundary Checks Are Needed
+Sometimes the grid launches more threads than the data actually needs.
+
+For example:
+- the image width is `76`
+- but `5` blocks of width `16` give us `80` thread positions in `x`
+
+That means some threads fall outside the image.
+
+So the kernel must check bounds before reading or writing:
+
+```cpp
+if (row < n && col < m) {
+    // process valid pixel
+}
+```
+
+Here:
+- `n` is the image height
+- `m` is the image width
+
+Without this check, threads outside the valid range may access invalid memory.
+
+## 2.3 Launching a 2D Kernel for an Image
+Assume:
+- `Pin_d` points to the input image in device memory
+- `Pout_d` points to the output image in device memory
+- `m` is the width
+- `n` is the height
+
+The host code can launch a 2D kernel like this:
+
+```cpp
+dim3 dimGrid(ceil(m / 16.0), ceil(n / 16.0), 1);
+dim3 dimBlock(16, 16, 1);
+colorToGrayscaleConversion<<<dimGrid, dimBlock>>>(Pin_d, Pout_d, m, n);
+```
+
+In this launch:
+- each block contains `16 x 16 = 256` threads
+- grid width depends on the image width
+- grid height depends on the image height
+
+If the image size is `1500 x 2000`, then:
+- blocks in `x` = `ceil(2000 / 16.0) = 125`
+- blocks in `y` = `ceil(1500 / 16.0) = 94`
+- total blocks = `125 * 94 = 11750`
+
+Inside the kernel:
+- `gridDim.x = 125`
+- `gridDim.y = 94`
+- `blockDim.x = 16`
+- `blockDim.y = 16`
+
+## 3. Main Takeaways
+- CUDA grids and blocks can be 1D, 2D, or 3D.
+- `blockIdx` identifies the block.
+- `threadIdx` identifies the thread inside the block.
+- `gridDim` and `blockDim` tell us the size of the launch configuration.
+- For 2D data such as images, 2D blocks and 2D grids make indexing much easier.
+- The global coordinates of a thread are computed from `blockIdx`, `blockDim`, and `threadIdx`.
+- Boundary checks are necessary when the total number of launched threads is larger than the data size.
