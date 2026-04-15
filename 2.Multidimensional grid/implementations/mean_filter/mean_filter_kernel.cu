@@ -1,4 +1,4 @@
-#include <cassert>
+#include <torch/extension.h>
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAStream.h>
 
@@ -78,13 +78,18 @@ inline unsigned int cdiv(unsigned int a, unsigned int b)
 torch::Tensor mean_filter(torch::Tensor image, int radius)
 {
     // Ensure tensor is on GPU
-    assert(image.device().is_cuda());
+    TORCH_CHECK(image.device().is_cuda(), "Input image must be a CUDA tensor");
 
     // Ensure data type is unsigned 8-bit (grayscale or RGB image)
-    assert(image.scalar_type() == torch::kByte);
+    TORCH_CHECK(image.scalar_type() == torch::kByte,
+        "Input image must be of type uint8 (torch.kByte)");
+
+    // Ensure tensor is 3D [C, H, W]
+    TORCH_CHECK(image.dim() == 3,
+        "Input image must be 3D (C, H, W), got ", image.dim(), "D");
 
     // Radius must be positive
-    assert(radius > 0);
+    TORCH_CHECK(radius > 0, "Radius must be positive, got ", radius);
 
     // Extract tensor dimensions: [C, H, W]
     const int channels = image.size(0);
