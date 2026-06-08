@@ -8,6 +8,7 @@
     Each thread computes ONE pixel value for ONE channel.
     We average values in a square window of size (2*radius + 1)^2.
 */
+
 __global__
 void mean_filter_kernel(unsigned char *output, unsigned char* input,
                         int width, int height, int channels, int radius)

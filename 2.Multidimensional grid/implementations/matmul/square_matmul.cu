@@ -1,3 +1,8 @@
+/*
+This program uses CUDA to calculate MATMUL of
+two Square matrices
+*/
+
 #include <iostream>
 #include <cuda_runtime.h>
 

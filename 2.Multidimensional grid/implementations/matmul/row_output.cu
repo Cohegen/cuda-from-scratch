@@ -1,5 +1,5 @@
 /*
-This program intends to implement a GPU kernel in 
+This program intends to implement a GPU kernel in
 which one thread produces one row of the output matrix
 */
 #include <iostream>
