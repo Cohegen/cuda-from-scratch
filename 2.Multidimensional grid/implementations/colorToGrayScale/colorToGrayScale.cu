@@ -1,4 +1,5 @@
 #include <torch/extension.h>
+#include <cassert>
 #include <c10/cuda/CUDAStream.h>
 #include <c10/cuda/CUDAException.h>
 
@@ -42,17 +43,14 @@ inline unsigned int cdiv(unsigned int a, unsigned int b)
 // Host function (PyTorch binding)
 torch::Tensor colorToGrayscale(torch::Tensor image, int radius)
 {
-    TORCH_CHECK(image.device().is_cuda(), "Input image must be a CUDA tensor");
-    TORCH_CHECK(image.scalar_type() == torch::kByte, "Input image must be of type uint8 (torch.kByte)");
-    TORCH_CHECK(image.dim() == 3, "Input image must be 3D (C, H, W), got ", image.dim(), "D");
-    TORCH_CHECK(radius > 0, "Radius must be positive, got ", radius);
+    assert(image.device().is_cuda());
+    assert(image.scalar_type() == torch::kByte);
+    assert(radius > 0);
 
     // PyTorch tensor shape: [C, H, W]
     const int channels = image.size(0);
     const int height   = image.size(1);
     const int width    = image.size(2);
-
-    TORCH_CHECK(channels == 3, "Input image must have 3 channels (RGB), got ", channels);
 
     // Output is grayscale: [H, W]
     auto result = torch::empty(
