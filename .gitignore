@@ -1,0 +1,47 @@
+# Compiled CUDA/C++ binaries
+*.o
+*.obj
+*.exe
+*.out
+*.a
+*.so
+*.dylib
+
+# Build directories
+build/
+cmake-build-*/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+*.egg
+
+# Virtual environments
+.env
+.venv/
+env/
+venv/
+
+# Secrets and credentials
+*.pem
+*.key
+*.secret
+.env.*
+credentials.json
+
+# Generated output files
+*.log

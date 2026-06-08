@@ -1,15 +1,22 @@
-<<<<<<< HEAD
 /*
 A simple and minimal cuda kernel which implements Vector Subtraction
 */
 
-
-=======
->>>>>>> de77627 (updates made)
 #include <iostream>
 #include <cuda_runtime.h>
 
 using namespace std;
+
+// Helper macro: check CUDA API calls and abort on error
+#define CUDA_CHECK(call)                                                       \
+    do {                                                                       \
+        cudaError_t err = (call);                                              \
+        if (err != cudaSuccess) {                                              \
+            cerr << "CUDA error in " << __FILE__ << ":" << __LINE__ << " - "   \
+                 << cudaGetErrorString(err) << endl;                           \
+            exit(EXIT_FAILURE);                                                \
+        }                                                                      \
+    } while (0)
 
 //kernel function (it runs on the GPU)
 __global__ void vecSubKernel(float *A,float*B,float *C,int n)
@@ -22,26 +29,20 @@ __global__ void vecSubKernel(float *A,float*B,float *C,int n)
     }
 }
 
-
-
-
 void vecSub(float*A,float*B,float *C,int n)
 {
     //declaring device memory locations for each vector
     float *A_d,*B_d,*C_d;
-    int size = n *sizeof(float);
+    size_t size = n *sizeof(float);
 
     //allocating device memory resource
-    cudaMalloc((void**)&A_d,size);
-    cudaMalloc((void**)&B_d,size);
-    cudaMalloc((void**)&C_d,size);
+    CUDA_CHECK(cudaMalloc((void**)&A_d,size));
+    CUDA_CHECK(cudaMalloc((void**)&B_d,size));
+    CUDA_CHECK(cudaMalloc((void**)&C_d,size));
 
     //data transfer
-    cudaMemcpy(A_d,A,size,cudaMemcpyHostToDevice);
-    cudaMemcpy(B_d,B,size,cudaMemcpyHostToDevice);
-
-
-    
+    CUDA_CHECK(cudaMemcpy(A_d,A,size,cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(B_d,B,size,cudaMemcpyHostToDevice));
 
     //kernel lauch configuration
     int blockSize = 256; // number of threads within the block
@@ -49,19 +50,22 @@ void vecSub(float*A,float*B,float *C,int n)
 
     //Launching kernel
     vecSubKernel <<<numBlocks,blockSize >>>(A_d,B_d,C_d,n);
+    CUDA_CHECK(cudaGetLastError());
+    CUDA_CHECK(cudaDeviceSynchronize());
 
     //copying result back to host
-    cudaMemcpy(C,C_d,size,cudaMemcpyDeviceToHost);
+    CUDA_CHECK(cudaMemcpy(C,C_d,size,cudaMemcpyDeviceToHost));
+
     //freeing up  device memory space
-    cudaFree(A_d);
-    cudaFree(B_d);
-    cudaFree(C_d);
+    CUDA_CHECK(cudaFree(A_d));
+    CUDA_CHECK(cudaFree(B_d));
+    CUDA_CHECK(cudaFree(C_d));
 }
 
 int main()
 {
     int n = 1000; //number of elements our respective vectors will have
-    int size = n*sizeof(float);
+    size_t size = n*sizeof(float);
 
     //Allocating host memory
     float *A = new float[n];
@@ -91,11 +95,5 @@ int main()
     delete [] B;
     delete [] C;
 
-
     return 0;
-
-<<<<<<< HEAD
 }
-=======
-}
->>>>>>> de77627 (updates made)

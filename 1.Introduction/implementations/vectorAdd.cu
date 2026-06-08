@@ -1,8 +1,18 @@
-
 #include <iostream>
 #include <cuda_runtime.h>
 
 using namespace std;
+
+// Helper macro: check CUDA API calls and abort on error
+#define CUDA_CHECK(call)                                                       \
+    do {                                                                       \
+        cudaError_t err = (call);                                              \
+        if (err != cudaSuccess) {                                              \
+            cerr << "CUDA error in " << __FILE__ << ":" << __LINE__ << " - "   \
+                 << cudaGetErrorString(err) << endl;                           \
+            exit(EXIT_FAILURE);                                                \
+        }                                                                      \
+    } while (0)
 
 // Kernel function (runs on GPU)
 __global__ void vecAddKernel(float *A, float *B, float *C, int n)
@@ -18,16 +28,16 @@ __global__ void vecAddKernel(float *A, float *B, float *C, int n)
 void vecAdd(float *A, float *B, float *C, int n)
 {
     float *A_d, *B_d, *C_d;
-    int size = n * sizeof(float);
+    size_t size = n * sizeof(float);
 
     // Allocate memory on device
-    cudaMalloc((void **)&A_d, size);
-    cudaMalloc((void **)&B_d, size);
-    cudaMalloc((void **)&C_d, size);
+    CUDA_CHECK(cudaMalloc((void **)&A_d, size));
+    CUDA_CHECK(cudaMalloc((void **)&B_d, size));
+    CUDA_CHECK(cudaMalloc((void **)&C_d, size));
 
     // Copy data from host to device
-    cudaMemcpy(A_d, A, size, cudaMemcpyHostToDevice);
-    cudaMemcpy(B_d, B, size, cudaMemcpyHostToDevice);
+    CUDA_CHECK(cudaMemcpy(A_d, A, size, cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(B_d, B, size, cudaMemcpyHostToDevice));
 
     // Kernel launch configuration
     int blockSize = 256;
@@ -35,20 +45,22 @@ void vecAdd(float *A, float *B, float *C, int n)
 
     // Launch kernel
     vecAddKernel<<<numBlocks, blockSize>>>(A_d, B_d, C_d, n);
+    CUDA_CHECK(cudaGetLastError());
+    CUDA_CHECK(cudaDeviceSynchronize());
 
     // Copy result back to host
-    cudaMemcpy(C, C_d, size, cudaMemcpyDeviceToHost);
+    CUDA_CHECK(cudaMemcpy(C, C_d, size, cudaMemcpyDeviceToHost));
 
     // Free device memory
-    cudaFree(A_d);
-    cudaFree(B_d);
-    cudaFree(C_d);
+    CUDA_CHECK(cudaFree(A_d));
+    CUDA_CHECK(cudaFree(B_d));
+    CUDA_CHECK(cudaFree(C_d));
 }
 
 int main()
 {
     int n = 1000;
-    int size = n * sizeof(float);
+    size_t size = n * sizeof(float);
 
     // Allocate host memory
     float *A = new float[n];
