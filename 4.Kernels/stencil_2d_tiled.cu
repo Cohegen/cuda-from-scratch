@@ -1,61 +1,153 @@
 /*
-Tiled 2D stencil using shared memory.
+    Tiled 2D 5-point stencil using shared memory.
+
+    Each block computes a TILE_WIDTH x TILE_WIDTH tile.
+    A one-cell halo is loaded around the tile so that
+    neighboring values can be read from shared memory
+    instead of global memory.
 */
 
 #include <cuda_runtime.h>
+#define TILE_WIDTH 16
 
-#define STENCIL_2D_TILE_WIDTH 16
-#define STENCIL_2D_TILE_RADIUS 1
-#define STENCIL_2D_SHARED_WIDTH (STENCIL_2D_TILE_WIDTH + 2 * STENCIL_2D_TILE_RADIUS)
-#define STENCIL_2D_FILTER_WIDTH (2 * STENCIL_2D_TILE_RADIUS + 1)
-
-__global__ void stencil2DTiled(
-    const float *input,
-    const float *coefficients,
-    float *output,
-    int width,
-    int height
-)
+__global__ void stencil_tiled_2d(const float* input,
+                                 float* output,
+                                 int width)
 {
-    __shared__ float tile[STENCIL_2D_SHARED_WIDTH][STENCIL_2D_SHARED_WIDTH];
+    // Shared memory tile including halo cells
+    __shared__ float input_s[TILE_WIDTH + 2][TILE_WIDTH + 2];
 
-    int tx = threadIdx.x;
-    int ty = threadIdx.y;
-    int outputCol = blockIdx.x * STENCIL_2D_TILE_WIDTH + tx;
-    int outputRow = blockIdx.y * STENCIL_2D_TILE_WIDTH + ty;
+    // Global coordinates
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
 
-    for (int tileRow = ty; tileRow < STENCIL_2D_SHARED_WIDTH; tileRow += blockDim.y)
+    // Local coordinates inside shared memory
+    int ty = threadIdx.y + 1;
+    int tx = threadIdx.x + 1;
+
+    //----------------------------------------------------
+    // Load center element
+    //----------------------------------------------------
+
+    if (row < width && col < width)
     {
-        for (int tileCol = tx; tileCol < STENCIL_2D_SHARED_WIDTH; tileCol += blockDim.x)
-        {
-            int inputRow = blockIdx.y * STENCIL_2D_TILE_WIDTH + tileRow - STENCIL_2D_TILE_RADIUS;
-            int inputCol = blockIdx.x * STENCIL_2D_TILE_WIDTH + tileCol - STENCIL_2D_TILE_RADIUS;
-
-            tile[tileRow][tileCol] =
-                (inputRow >= 0 && inputRow < height &&
-                 inputCol >= 0 && inputCol < width)
-                    ? input[inputRow * width + inputCol]
-                    : 0.0f;
-        }
+        input_s[ty][tx] = input[row * width + col];
     }
+
+    //----------------------------------------------------
+    // Load left halo
+    //----------------------------------------------------
+
+    if (threadIdx.x == 0 &&
+        col > 0 &&
+        row < width)
+    {
+        input_s[ty][0] =
+            input[row * width + col - 1];
+    }
+
+    //----------------------------------------------------
+    // Load right halo
+    //----------------------------------------------------
+
+    if (threadIdx.x == TILE_WIDTH - 1 &&
+        col < width - 1 &&
+        row < width)
+    {
+        input_s[ty][TILE_WIDTH + 1] =
+            input[row * width + col + 1];
+    }
+
+    //----------------------------------------------------
+    // Load top halo
+    //----------------------------------------------------
+
+    if (threadIdx.y == 0 &&
+        row > 0 &&
+        col < width)
+    {
+        input_s[0][tx] =
+            input[(row - 1) * width + col];
+    }
+
+    //----------------------------------------------------
+    // Load bottom halo
+    //----------------------------------------------------
+
+    if (threadIdx.y == TILE_WIDTH - 1 &&
+        row < width - 1 &&
+        col < width)
+    {
+        input_s[TILE_WIDTH + 1][tx] =
+            input[(row + 1) * width + col];
+    }
+
+    //----------------------------------------------------
+    // Load corner halos
+    //----------------------------------------------------
+
+    // Top-left
+    if (threadIdx.x == 0 &&
+        threadIdx.y == 0 &&
+        row > 0 &&
+        col > 0)
+    {
+        input_s[0][0] =
+            input[(row - 1) * width + col - 1];
+    }
+
+    // Top-right
+    if (threadIdx.x == TILE_WIDTH - 1 &&
+        threadIdx.y == 0 &&
+        row > 0 &&
+        col < width - 1)
+    {
+        input_s[0][TILE_WIDTH + 1] =
+            input[(row - 1) * width + col + 1];
+    }
+
+    // Bottom-left
+    if (threadIdx.x == 0 &&
+        threadIdx.y == TILE_WIDTH - 1 &&
+        row < width - 1 &&
+        col > 0)
+    {
+        input_s[TILE_WIDTH + 1][0] =
+            input[(row + 1) * width + col - 1];
+    }
+
+    // Bottom-right
+    if (threadIdx.x == TILE_WIDTH - 1 &&
+        threadIdx.y == TILE_WIDTH - 1 &&
+        row < width - 1 &&
+        col < width - 1)
+    {
+        input_s[TILE_WIDTH + 1][TILE_WIDTH + 1] =
+            input[(row + 1) * width + col + 1];
+    }
+
+   
+    // Wait until the entire tile has been loaded
+  
 
     __syncthreads();
 
-    if (outputRow >= height || outputCol >= width)
+   
+    // Compute the stencil
+    
+
+    if (row > 0 &&
+        row < width - 1 &&
+        col > 0 &&
+        col < width - 1)
     {
-        return;
+        output[row * width + col] =
+            (
+                input_s[ty][tx] +
+                input_s[ty][tx - 1] +
+                input_s[ty][tx + 1] +
+                input_s[ty - 1][tx] +
+                input_s[ty + 1][tx]
+            ) / 5.0f;
     }
-
-    float value = 0.0f;
-
-    for (int filterRow = 0; filterRow < STENCIL_2D_FILTER_WIDTH; ++filterRow)
-    {
-        for (int filterCol = 0; filterCol < STENCIL_2D_FILTER_WIDTH; ++filterCol)
-        {
-            value += tile[ty + filterRow][tx + filterCol] *
-                coefficients[filterRow * STENCIL_2D_FILTER_WIDTH + filterCol];
-        }
-    }
-
-    output[outputRow * width + outputCol] = value;
 }
