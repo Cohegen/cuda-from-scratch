@@ -1,81 +1,190 @@
-/*
-Tiled 2D stencil with thread coarsening along the x dimension.
-*/
-
 #include <cuda_runtime.h>
 
-#define STENCIL_2D_TC_TILE_WIDTH 16
-#define STENCIL_2D_TC_RADIUS 1
-#define STENCIL_2D_TC_FACTOR 2
-#define STENCIL_2D_TC_OUTPUT_WIDTH (STENCIL_2D_TC_TILE_WIDTH * STENCIL_2D_TC_FACTOR)
-#define STENCIL_2D_TC_SHARED_WIDTH (STENCIL_2D_TC_OUTPUT_WIDTH + 2 * STENCIL_2D_TC_RADIUS)
-#define STENCIL_2D_TC_FILTER_WIDTH (2 * STENCIL_2D_TC_RADIUS + 1)
+#define TILE_WIDTH     16
+#define COARSE_FACTOR   2
 
-__global__ void stencil2DTiledCoarsened(
-    const float *input,
-    const float *coefficients,
-    float *output,
-    int width,
-    int height
-)
+__global__
+void stencil_tiled_coarsened(
+    const float* input,
+    float* output,
+    int width)
 {
-    __shared__ float tile[STENCIL_2D_TC_TILE_WIDTH + 2 * STENCIL_2D_TC_RADIUS]
-                         [STENCIL_2D_TC_SHARED_WIDTH];
+    __shared__
+    float tile[TILE_WIDTH + 2]
+              [TILE_WIDTH * COARSE_FACTOR + 2];
 
-    int tx = threadIdx.x;
     int ty = threadIdx.y;
-    int outputRow = blockIdx.y * STENCIL_2D_TC_TILE_WIDTH + ty;
-    int outputColBase =
-        blockIdx.x * STENCIL_2D_TC_OUTPUT_WIDTH +
-        tx * STENCIL_2D_TC_FACTOR;
+    int tx = threadIdx.x;
 
-    for (int tileRow = ty;
-         tileRow < STENCIL_2D_TC_TILE_WIDTH + 2 * STENCIL_2D_TC_RADIUS;
-         tileRow += blockDim.y)
+    // Beginning of this thread's work
+    int row = blockIdx.y * TILE_WIDTH + ty;
+    int baseCol =
+        blockIdx.x * (TILE_WIDTH * COARSE_FACTOR)
+        + tx;
+
+    //----------------------------------------------------
+    // Load center values
+    //----------------------------------------------------
+
+    #pragma unroll
+    for (int c = 0; c < COARSE_FACTOR; c++)
     {
-        for (int tileCol = tx; tileCol < STENCIL_2D_TC_SHARED_WIDTH; tileCol += blockDim.x)
-        {
-            int inputRow = blockIdx.y * STENCIL_2D_TC_TILE_WIDTH +
-                tileRow - STENCIL_2D_TC_RADIUS;
-            int inputCol = blockIdx.x * STENCIL_2D_TC_OUTPUT_WIDTH +
-                tileCol - STENCIL_2D_TC_RADIUS;
+        int col = baseCol + c * TILE_WIDTH;
 
-            tile[tileRow][tileCol] =
-                (inputRow >= 0 && inputRow < height &&
-                 inputCol >= 0 && inputCol < width)
-                    ? input[inputRow * width + inputCol]
-                    : 0.0f;
+        if (row < width && col < width)
+        {
+            tile[ty + 1][tx + c * TILE_WIDTH + 1] =
+                input[row * width + col];
+        }
+    }
+
+    //----------------------------------------------------
+    // Left halo
+    //----------------------------------------------------
+
+    if (tx == 0)
+    {
+        int col = baseCol;
+
+        if (row < width && col > 0)
+        {
+            tile[ty + 1][0] =
+                input[row * width + col - 1];
+        }
+    }
+
+    //----------------------------------------------------
+    // Right halo
+    //----------------------------------------------------
+
+    if (tx == TILE_WIDTH - 1)
+    {
+        int col =
+            baseCol +
+            (COARSE_FACTOR - 1) * TILE_WIDTH;
+
+        if (row < width &&
+            col < width - 1)
+        {
+            tile[ty + 1]
+                [TILE_WIDTH * COARSE_FACTOR + 1] =
+                input[row * width + col + 1];
+        }
+    }
+
+    //----------------------------------------------------
+    // Top and bottom halos
+    //----------------------------------------------------
+
+    if (ty == 0)
+    {
+        #pragma unroll
+        for (int c = 0; c < COARSE_FACTOR; c++)
+        {
+            int col = baseCol + c * TILE_WIDTH;
+
+            if (row > 0 &&
+                col < width)
+            {
+                tile[0][tx + c * TILE_WIDTH + 1] =
+                    input[(row - 1) * width + col];
+            }
+        }
+    }
+
+    if (ty == TILE_WIDTH - 1)
+    {
+        #pragma unroll
+        for (int c = 0; c < COARSE_FACTOR; c++)
+        {
+            int col = baseCol + c * TILE_WIDTH;
+
+            if (row < width - 1 &&
+                col < width)
+            {
+                tile[TILE_WIDTH + 1]
+                    [tx + c * TILE_WIDTH + 1] =
+                    input[(row + 1) * width + col];
+            }
+        }
+    }
+
+    //----------------------------------------------------
+    // Four corners
+    //----------------------------------------------------
+
+    if (tx == 0 && ty == 0)
+    {
+        if (row > 0 && baseCol > 0)
+            tile[0][0] =
+                input[(row - 1) * width + baseCol - 1];
+    }
+
+    if (tx == TILE_WIDTH - 1 && ty == 0)
+    {
+        int col =
+            baseCol +
+            (COARSE_FACTOR - 1) * TILE_WIDTH;
+
+        if (row > 0 &&
+            col < width - 1)
+        {
+            tile[0][TILE_WIDTH * COARSE_FACTOR + 1] =
+                input[(row - 1) * width + col + 1];
+        }
+    }
+
+    if (tx == 0 && ty == TILE_WIDTH - 1)
+    {
+        if (row < width - 1 &&
+            baseCol > 0)
+        {
+            tile[TILE_WIDTH + 1][0] =
+                input[(row + 1) * width + baseCol - 1];
+        }
+    }
+
+    if (tx == TILE_WIDTH - 1 &&
+        ty == TILE_WIDTH - 1)
+    {
+        int col =
+            baseCol +
+            (COARSE_FACTOR - 1) * TILE_WIDTH;
+
+        if (row < width - 1 &&
+            col < width - 1)
+        {
+            tile[TILE_WIDTH + 1]
+                [TILE_WIDTH * COARSE_FACTOR + 1] =
+                input[(row + 1) * width + col + 1];
         }
     }
 
     __syncthreads();
 
-    if (outputRow >= height)
+    //----------------------------------------------------
+    // Compute two stencil outputs
+    //----------------------------------------------------
+
+    #pragma unroll
+    for (int c = 0; c < COARSE_FACTOR; c++)
     {
-        return;
-    }
+        int col = baseCol + c * TILE_WIDTH;
+        int lx = tx + c * TILE_WIDTH + 1;
 
-    for (int item = 0; item < STENCIL_2D_TC_FACTOR; ++item)
-    {
-        int outputCol = outputColBase + item;
-
-        if (outputCol >= width)
+        if (row > 0 &&
+            row < width - 1 &&
+            col > 0 &&
+            col < width - 1)
         {
-            continue;
+            output[row * width + col] =
+            (
+                tile[ty + 1][lx] +
+                tile[ty + 1][lx - 1] +
+                tile[ty + 1][lx + 1] +
+                tile[ty][lx] +
+                tile[ty + 2][lx]
+            ) * 0.2f;
         }
-
-        float value = 0.0f;
-        int tileColBase = tx * STENCIL_2D_TC_FACTOR + item;
-
-        for (int filterRow = 0; filterRow < STENCIL_2D_TC_FILTER_WIDTH; ++filterRow)
-        {
-            for (int filterCol = 0; filterCol < STENCIL_2D_TC_FILTER_WIDTH; ++filterCol)
-            {
-                value += tile[ty + filterRow][tileColBase + filterCol] *
-                    coefficients[filterRow * STENCIL_2D_TC_FILTER_WIDTH + filterCol];
-            }
-        }
-
-        output[outputRow * width + outputCol] = value;
     }
 }
