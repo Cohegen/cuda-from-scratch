@@ -1,61 +1,43 @@
 /*
-2D stencil with thread coarsening along the x dimension.
+A 2D stencil kernel where instead of an individual thread is to calculate one output element
+it instead calculates two or more output elements
+
 */
 
-#include <cuda_runtime.h>
+#define TILE_WIDTH 16
+#define COARSE_FACTOR 2
 
-#define STENCIL_2D_COARSE_RADIUS 1
-#define STENCIL_2D_COARSE_WIDTH (2 * STENCIL_2D_COARSE_RADIUS + 1)
-#define STENCIL_2D_COARSE_FACTOR 4
 
-__global__ void stencil2DCoarsened(
-    const float *input,
-    const float *coefficients,
-    float *output,
-    int width,
-    int height
-)
+__global__
+void stencil_2d_coarsened(const float* input,
+                          float* output,
+                          int width,
+                          int height)
 {
-    int row = blockIdx.y * blockDim.y + threadIdx.y;
-    int startCol =
-        (blockIdx.x * blockDim.x + threadIdx.x) * STENCIL_2D_COARSE_FACTOR;
+    int row = blockIdx.y * TILE_WIDTH + threadIdx.y;
+    int col = blockIdx.x * TILE_WIDTH * COARSE_FACTOR + threadIdx.x;
 
-    if (row >= height)
+    int rowOffset = row * width;
+
+    for (int c = 0; c < COARSE_FACTOR; c++)
     {
-        return;
-    }
+        int currentCol = col + c * TILE_WIDTH;
 
-    for (int item = 0; item < STENCIL_2D_COARSE_FACTOR; ++item)
-    {
-        int col = startCol + item;
-
-        if (col >= width)
+        if (row > 0 &&
+            row < height - 1 &&
+            currentCol > 0 &&
+            currentCol < width - 1)
         {
-            return;
+            int idx = rowOffset + currentCol;
+
+            output[idx] =
+            (
+                input[idx] +
+                input[idx - 1] +
+                input[idx + 1] +
+                input[idx - width] +
+                input[idx + width]
+            ) / 5.0f;
         }
-
-        float value = 0.0f;
-
-        for (int filterRow = -STENCIL_2D_COARSE_RADIUS; filterRow <= STENCIL_2D_COARSE_RADIUS; ++filterRow)
-        {
-            for (int filterCol = -STENCIL_2D_COARSE_RADIUS; filterCol <= STENCIL_2D_COARSE_RADIUS; ++filterCol)
-            {
-                int inputRow = row + filterRow;
-                int inputCol = col + filterCol;
-
-                if (inputRow >= 0 && inputRow < height &&
-                    inputCol >= 0 && inputCol < width)
-                {
-                    int filterIndex =
-                        (filterRow + STENCIL_2D_COARSE_RADIUS) * STENCIL_2D_COARSE_WIDTH +
-                        (filterCol + STENCIL_2D_COARSE_RADIUS);
-
-                    value += input[inputRow * width + inputCol] *
-                        coefficients[filterIndex];
-                }
-            }
-        }
-
-        output[row * width + col] = value;
     }
 }
