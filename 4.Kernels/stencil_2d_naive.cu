@@ -1,49 +1,18 @@
 /*
-Naive 2D stencil using global memory.
+This is a 2D implementation of a  stencil but this 
+is a naive version where we use global memory access
 */
 
-#include <cuda_runtime.h>
-
-#define STENCIL_2D_RADIUS 1
-#define STENCIL_2D_WIDTH (2 * STENCIL_2D_RADIUS + 1)
-
-__global__ void stencil2DNaive(
-    const float *input,
-    const float *coefficients,
-    float *output,
-    int width,
-    int height
-)
+__global__ void stencil_2d(float*input,float*output,int width)
 {
-    int col = blockIdx.x * blockDim.x + threadIdx.x;
-    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int row = blockIdx.y*blockDim.y + threadIdx.y;
+    int col = blockIdx.x*blockDim.x + threadIdx.x;
 
-    if (row >= height || col >= width)
+    if((row>0 && row<width-1)&& (col>0 && col<width-1))
     {
-        return;
+        int idx = row*width+col;
+        output[idx] = (
+            input[idx]+input[idx-1]+input[idx+1]+input[idx-width]+input[idx+width]
+        )/5.0f;
     }
-
-    float value = 0.0f;
-
-    for (int filterRow = -STENCIL_2D_RADIUS; filterRow <= STENCIL_2D_RADIUS; ++filterRow)
-    {
-        for (int filterCol = -STENCIL_2D_RADIUS; filterCol <= STENCIL_2D_RADIUS; ++filterCol)
-        {
-            int inputRow = row + filterRow;
-            int inputCol = col + filterCol;
-
-            if (inputRow >= 0 && inputRow < height &&
-                inputCol >= 0 && inputCol < width)
-            {
-                int filterIndex =
-                    (filterRow + STENCIL_2D_RADIUS) * STENCIL_2D_WIDTH +
-                    (filterCol + STENCIL_2D_RADIUS);
-
-                value += input[inputRow * width + inputCol] *
-                    coefficients[filterIndex];
-            }
-        }
-    }
-
-    output[row * width + col] = value;
 }
