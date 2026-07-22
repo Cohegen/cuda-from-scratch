@@ -47,27 +47,36 @@ So neighbors becomes:
 #include <cuda_runtime.h>
 #include <iostream>
 
-__global__ void stencil_3d_naive(float*input,float*output,int depth,int width,int height)
+__global__ void stencil_3d_naive(const float* input, float* output, int width, int height, int depth)
 {
+    // Global coordinates 
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    int z = blockIdx.z * blockDim.z + threadIdx.z;
 
-    //golbal coordinates 
-    int x = blockIdx.x*blockDim.x+threadIdx.x;
-    int y = blockIdx.y*blockDim.y+threadIdx.y;
-    int z = blockIdx.z*blockDim.z+threadIdx.z;
+    int slice = width * height;
 
-    //boundary checks
-    if(x>0&&x<width-1&&y>0&&height-1&&z>0&&depth-1)
+    // Boundary checks
+    if (x > 0 && x < width - 1 &&
+        y > 0 && y < height - 1 &&
+        z > 0 && z < depth - 1)
     {
-        int idx = z*(height*width)+y*height+x;
+        int idx = z * slice + y * width + x;
 
-        output[idx] =(
-            output[idx]+//center
-            output[idx-1]+//left
-            output[idx+1]+//right
-            output[idx-width]+//up
-            output[idx+width]+//bottom
-            output[idx-(height*width)]+ //front
-            output[idx+(height*width)]//back
-        )/7.0f;
+        output[idx] = (
+            input[idx] +                      // center
+            input[idx - 1] +                  // left
+            input[idx + 1] +                  // right
+            input[idx - width] +              // up
+            input[idx + width] +              // bottom
+            input[idx - slice] +              // front
+            input[idx + slice]                // back
+        ) / 7.0f;
+    }
+    else if (x < width && y < height && z < depth)
+    {
+        int idx = z * slice + y * width + x;
+        output[idx] = input[idx];
     }
 }
+

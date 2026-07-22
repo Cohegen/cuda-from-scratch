@@ -1,39 +1,52 @@
 /*
-This is a 2D implementation of a  stencil but this 
-is a naive version where we use global memory access
+This is a 2D implementation of a 5-point stencil using naive global memory access.
+Each thread calculates one output pixel by averaging itself and its 4 orthogonal neighbors.
 */
 
-__global__ void stencil_2d(float*input,float*output,int width)
+#include <cuda_runtime.h>
+#include <torch/extension.h>
+#include <c10/cuda/CUDAException.h>
+#include <c10/cuda/CUDAStream.h>
+
+__global__ void stencil_2d(const float* input, float* output, int width)
 {
     int col = blockIdx.x * blockDim.x + threadIdx.x;
     int row = blockIdx.y * blockDim.y + threadIdx.y;
 
-    if (row >= height || col >= width)
+    if (row > 0 && row < width - 1 && col > 0 && col < width - 1)
     {
-        return;
+        int idx = row * width + col;
+        output[idx] = (
+            input[idx] +
+            input[idx - 1] +
+            input[idx + 1] +
+            input[idx - width] +
+            input[idx + width]
+        ) / 5.0f;
     }
-
-    float value = 0.0f;
-
-    for (int filterRow = -STENCIL_2D_RADIUS; filterRow <= STENCIL_2D_RADIUS; ++filterRow)
+    else if (row < width && col < width)
     {
-        for (int filterCol = -STENCIL_2D_RADIUS; filterCol <= STENCIL_2D_RADIUS; ++filterCol)
-        {
-            int inputRow = row + filterRow;
-            int inputCol = col + filterCol;
-
-            if (inputRow >= 0 && inputRow < height &&
-                inputCol >= 0 && inputCol < width)
-            {
-                int filterIndex =
-                    (filterRow + STENCIL_2D_RADIUS) * STENCIL_2D_WIDTH +
-                    (filterCol + STENCIL_2D_RADIUS);
-
-                value += input[inputRow * width + inputCol] *
-                    coefficients[filterIndex];
-            }
-        }
+        // For boundary elements, preserve input value
+        output[row * width + col] = input[row * width + col];
     }
-
-    output[row * width + col] = value;
 }
+
+void stencil_2d_cuda(torch::Tensor input, torch::Tensor output, int width)
+{
+    TORCH_CHECK(input.device().is_cuda(), "input must be a CUDA tensor");
+    TORCH_CHECK(output.device().is_cuda(), "output must be a CUDA tensor");
+    TORCH_CHECK(input.scalar_type() == torch::kFloat32, "input must be float32");
+    TORCH_CHECK(output.scalar_type() == torch::kFloat32, "output must be float32");
+
+    dim3 threadsPerBlock(16, 16);
+    dim3 blocksPerGrid((width + 15) / 16, (width + 15) / 16);
+
+    stencil_2d<<<blocksPerGrid, threadsPerBlock, 0, c10::cuda::getCurrentCUDAStream()>>>(
+        input.data_ptr<float>(),
+        output.data_ptr<float>(),
+        width
+    );
+
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
