@@ -1,38 +1,19 @@
 /*
-Naive 1D stencil.
+A 1D implementation of Stencil
+This stencil averages three neighboring elements i.e on the right and one on the left
 */
 
-#include <cuda_runtime.h>
-
-#define STENCIL_1D_RADIUS 3
-#define STENCIL_1D_WIDTH (2 * STENCIL_1D_RADIUS + 1)
-
-__global__ void stencil1DNaive(
-    const float *input,
-    const float *coefficients,
-    float *output,
-    int size
-)
+__global__ void stencil_1D(float*input,float*output,int width)
 {
-    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
 
-    if (index >= size)
+    if (i < width)
     {
-        return;
+        // Handle boundary conditions: use the element itself if neighbor is out of bounds
+        float left = (i > 0) ? input[i - 1] : input[i];
+        float center = input[i];
+        float right = (i < width - 1) ? input[i + 1] : input[i];
+
+        output[i] = (left + center + right) / 3.0f;
     }
-
-    float value = 0.0f;
-
-    for (int offset = -STENCIL_1D_RADIUS; offset <= STENCIL_1D_RADIUS; ++offset)
-    {
-        int inputIndex = index + offset;
-
-        if (inputIndex >= 0 && inputIndex < size)
-        {
-            value += input[inputIndex] *
-                coefficients[offset + STENCIL_1D_RADIUS];
-        }
-    }
-
-    output[index] = value;
 }
