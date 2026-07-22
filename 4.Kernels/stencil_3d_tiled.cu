@@ -2,78 +2,96 @@
 Tiled 3D stencil using shared memory.
 */
 
-#include <cuda_runtime.h>
+/*
+A tiled 3D stencil whose goal is to increase operations per byte
+by loading an 8x8x8 input tile into shared memory also including halo
+cells thus catering for top,left,right,bottom,front and back neighbors
+of the center element thus input tile size becomes 10x10x10 
+*/
 
-#define STENCIL_3D_TILE_WIDTH 8
-#define STENCIL_3D_TILE_RADIUS 1
-#define STENCIL_3D_SHARED_WIDTH (STENCIL_3D_TILE_WIDTH + 2 * STENCIL_3D_TILE_RADIUS)
-#define STENCIL_3D_FILTER_WIDTH (2 * STENCIL_3D_TILE_RADIUS + 1)
+#define TILE_WIDTH 8
 
-__global__ void stencil3DTiled(
-    const float *input,
-    const float *coefficients,
-    float *output,
-    int width,
-    int height,
-    int depth
-)
+__global__ void stencil_3d_tiled(float*input,float*output,int width,int height,int depth)
 {
-    __shared__ float tile[STENCIL_3D_SHARED_WIDTH]
-                         [STENCIL_3D_SHARED_WIDTH]
-                         [STENCIL_3D_SHARED_WIDTH];
+    //defining input tile stored in shared memory
+    __shared__ input_tile[TILE_WIDTH+2][TILE_WIDTH+2][TILE_WIDTH+2];
 
-    int tx = threadIdx.x;
-    int ty = threadIdx.y;
-    int tz = threadIdx.z;
-    int outputX = blockIdx.x * STENCIL_3D_TILE_WIDTH + tx;
-    int outputY = blockIdx.y * STENCIL_3D_TILE_WIDTH + ty;
-    int outputZ = blockIdx.z * STENCIL_3D_TILE_WIDTH + tz;
-    int threadsPerBlock = blockDim.x * blockDim.y * blockDim.z;
-    int linearThread = (tz * blockDim.y + ty) * blockDim.x + tx;
-    int sharedCells = STENCIL_3D_SHARED_WIDTH *
-        STENCIL_3D_SHARED_WIDTH * STENCIL_3D_SHARED_WIDTH;
+    //declaring global coordinates
+    int x = blockIdx.x*blockDim.x+threadIdx.x;
+    int y = blockIdx.y*blockDim.y+threadIdx.y;
+    int z= blockIdx.z*blockDim.z+threadIdx.z;
 
-    for (int cell = linearThread; cell < sharedCells; cell += threadsPerBlock)
+    //defining linear index
+    int slice = width*height;
+
+    int idx=z*slice+y*width+x;
+
+    //clearing up room in shared memory for halo cells
+    int ty = threadIdx.y+1;
+    int tx = theadIdx.x+1;
+    int tz = threadIdx.z+1;
+
+    //loading center element
+    if(x>0&&x<width && y>0&&height && z>0&& depth)
     {
-        int tileX = cell % STENCIL_3D_SHARED_WIDTH;
-        int tileY = (cell / STENCIL_3D_SHARED_WIDTH) % STENCIL_3D_SHARED_WIDTH;
-        int tileZ = cell / (STENCIL_3D_SHARED_WIDTH * STENCIL_3D_SHARED_WIDTH);
-        int inputX = blockIdx.x * STENCIL_3D_TILE_WIDTH + tileX - STENCIL_3D_TILE_RADIUS;
-        int inputY = blockIdx.y * STENCIL_3D_TILE_WIDTH + tileY - STENCIL_3D_TILE_RADIUS;
-        int inputZ = blockIdx.z * STENCIL_3D_TILE_WIDTH + tileZ - STENCIL_3D_TILE_RADIUS;
-
-        tile[tileZ][tileY][tileX] =
-            (inputX >= 0 && inputX < width &&
-             inputY >= 0 && inputY < height &&
-             inputZ >= 0 && inputZ < depth)
-                ? input[(inputZ * height + inputY) * width + inputX]
-                : 0.0f;
+        input_tile[tz][ty][tx] = input[idx];
     }
 
+    //loading left element
+    if(threadIdx.x==0&&x>0&&y<height&&z<depth)
+    {
+        input_tile[tz][ty][0] = input[idx-1];
+    }
+
+    //loading right halo
+    if(threadIdx.x==TILE_WIDTH-1&&x<width-1&&y<height&&z<depth)
+    {
+        input_tile[tz][ty][TILE_WIDTH+1] =input[idx+1];
+    }
+
+    //loading top halo
+    if(threadIdx.y==0&&y>0&&x<width&& z>depth)
+    {
+        input_tile[tz][0][tx] = input[idx-width];
+    }
+
+    //loading bottom halo
+    if(threadIdx.y==TILE_WIDTH-1&&y<height-1&& x<width&&z<depth)
+    {
+        input_tile[tz][TILE_WIDTH+1][tx] =input[idx+width];
+    }
+
+    //loading front halo
+    if(threadIdx.z=0&&z>0&&y<height&&x<width)
+    {
+        input_tile[0][ty][tx] = input[idx-slice];
+
+    }
+
+    //loading back halo
+    if(threadIdx.z==TILE_WIDTH-1&&z<depth-1&&x>width&&y<height)
+    {
+        input_tile[TILE_WIDTH+1][ty][tx] = input[idx+slice];
+    }
+
+    //waiting for all thread to enter elements
     __syncthreads();
 
-    if (outputX >= width || outputY >= height || outputZ >= depth)
+
+    //calculating output elements
+    if(x>0&&x<width-1&&y>0&&y<height-1&&z>0&&z<depth-1)
     {
-        return;
+        output[idx] = (
+            input_tile[tz][ty][tx]+//center
+            input_tile[tz][ty][tx-1]+//left
+            input_tile[tz][ty][tx+1]+//right
+            input_tile[tz][ty-1][tx]+//top
+            input_tile[tz][ty+1][tx]+//bottom
+            input_tile[tz-1][ty][tx]+//front
+            input_tile[tz+1][ty][tx]+//back
+        )/7.0f;
     }
 
-    float value = 0.0f;
 
-    for (int filterZ = 0; filterZ < STENCIL_3D_FILTER_WIDTH; ++filterZ)
-    {
-        for (int filterY = 0; filterY < STENCIL_3D_FILTER_WIDTH; ++filterY)
-        {
-            for (int filterX = 0; filterX < STENCIL_3D_FILTER_WIDTH; ++filterX)
-            {
-                int filterIndex =
-                    (filterZ * STENCIL_3D_FILTER_WIDTH + filterY) *
-                    STENCIL_3D_FILTER_WIDTH + filterX;
 
-                value += tile[tz + filterZ][ty + filterY][tx + filterX] *
-                    coefficients[filterIndex];
-            }
-        }
-    }
-
-    output[(outputZ * height + outputY) * width + outputX] = value;
 }
