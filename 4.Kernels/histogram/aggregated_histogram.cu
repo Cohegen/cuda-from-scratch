@@ -3,9 +3,9 @@
 
 constexpr int NUM_BINS = 7;
 
-// ----------------------------------------------------------------------------
+
 // CUDA Kernel
-// ----------------------------------------------------------------------------
+
 __global__ void histo_private_kernel(
     const char* data,
     unsigned int length,
@@ -13,9 +13,9 @@ __global__ void histo_private_kernel(
 {
     __shared__ unsigned int histo_shared[NUM_BINS];
 
-    // ------------------------------------------------------------------------
+   
     // Initialize shared histogram
-    // ------------------------------------------------------------------------
+   
     for (unsigned int bin = threadIdx.x;
          bin < NUM_BINS;
          bin += blockDim.x)
